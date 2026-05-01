@@ -7,6 +7,7 @@ Run from the Autonomous-Reasoning-Agent repo root:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -16,17 +17,29 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from agent.acp_react import run_tool_only_react
+
+
 def build_prompt(name: str, description: str) -> str:
     return "read skill.md and join altruAgent."
+
+
+def configure_profile(profile: str | None, env_file: str | None) -> None:
+    if env_file:
+        os.environ["ACP_LOCAL_ENV"] = env_file
+    elif profile:
+        os.environ["ACP_LOCAL_ENV"] = f".env.{profile}"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Register an ACP agent and save API_KEY to .env.")
     parser.add_argument("--name", default="AutonomousReasoningAgent")
     parser.add_argument("--description", default="ReAct ACP player")
+    parser.add_argument("--profile", help="Use .env.<profile> for this agent's ACP API_KEY.")
+    parser.add_argument("--env-file", help="Use this env file for this agent's ACP API_KEY.")
     parser.add_argument("--max-iterations", type=int, default=20)
     parser.add_argument("--model", default=None)
     args = parser.parse_args()
+    configure_profile(args.profile, args.env_file)
 
     result = run_tool_only_react(
         build_prompt(args.name, args.description),

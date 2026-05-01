@@ -26,9 +26,9 @@ Available tools:
   Makes a guarded curl request. The URL is blocked unless it is under the
   control-plane or data-plane URLs from Agent_ACP/cdk/.env.
 - save_api_key_to_env: sk_agent_...
-  Saves the ACP API key to this repo's local .env as API_KEY.
+  Saves the ACP API key to this run's configured local env file as API_KEY.
 - get_env_var: API_KEY
-  Reads a whitelisted local environment value.
+  Reads a whitelisted value from the process environment or this run's configured local env file.
 - sleep_seconds: {"seconds":5}
   Sleeps before a polling retry.
 

@@ -23,7 +23,6 @@ ARENA_DIR = ROOT_DIR.parent
 ACP_DIR = ARENA_DIR / "Agent_ACP"
 ACP_CDK_ENV = ACP_DIR / "cdk" / ".env"
 ACP_BACKEND_SKILL = ACP_DIR / "backend" / "SKILL.md"
-LOCAL_ENV = ROOT_DIR / ".env"
 
 ALLOWED_ENV_KEYS = {"API_KEY", "ACCESS_TOKEN", "GAME_SERVER_URL"}
 
@@ -91,14 +90,25 @@ def read_skill(argument: str = "") -> str:
     return ACP_BACKEND_SKILL.read_text(encoding="utf-8")
 
 
+def local_env_path() -> Path:
+    configured = os.getenv("ACP_LOCAL_ENV")
+    if configured:
+        path = Path(configured)
+        return path if path.is_absolute() else ROOT_DIR / path
+    return ROOT_DIR / ".env"
+
+
 def _load_local_env() -> dict[str, str]:
-    if not LOCAL_ENV.exists():
+    path = local_env_path()
+    if not path.exists():
         return {}
-    return _parse_env_file(LOCAL_ENV)
+    return _parse_env_file(path)
 
 
 def _upsert_local_env_var(key: str, value: str) -> None:
-    lines = LOCAL_ENV.read_text(encoding="utf-8").splitlines() if LOCAL_ENV.exists() else []
+    path = local_env_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     updated = False
     next_lines: list[str] = []
 
@@ -115,7 +125,7 @@ def _upsert_local_env_var(key: str, value: str) -> None:
     if not updated:
         next_lines.append(f"{key}={value}")
 
-    LOCAL_ENV.write_text("\n".join(next_lines) + "\n", encoding="utf-8")
+    path.write_text("\n".join(next_lines) + "\n", encoding="utf-8")
 
 
 def save_api_key_to_env(argument: str) -> str:
@@ -124,7 +134,7 @@ def save_api_key_to_env(argument: str) -> str:
         raise ToolError("Refusing to save API key because it does not look like an ACP agent key.")
 
     _upsert_local_env_var("API_KEY", api_key)
-    return f"Saved API_KEY to {LOCAL_ENV}"
+    return f"Saved API_KEY to {local_env_path()}"
 
 
 def get_env_var(argument: str) -> str:
@@ -133,7 +143,7 @@ def get_env_var(argument: str) -> str:
         raise ToolError(f"Only these env vars are exposed: {sorted(ALLOWED_ENV_KEYS)}")
     value = os.getenv(key) or _load_local_env().get(key)
     if not value:
-        raise ToolError(f"{key} is not set in environment or {LOCAL_ENV}")
+        raise ToolError(f"{key} is not set in environment or {local_env_path()}")
     return value
 
 
