@@ -34,7 +34,16 @@ Available tools:
 
 Use compact one-line JSON for curl_request arguments.
 When the workflow is complete, output Decision: followed by the concise result.
+
+Tester context policy:
+- This tester keeps only a rolling recent transcript to reduce token usage.
+- If older messages are not visible, continue from the current Observation and reread SKILL.md when needed.
 """.strip()
+
+MAX_CONTEXT_CHARS = 70000
+RECENT_MESSAGE_COUNT = 8
+MAX_RECENT_MESSAGE_CHARS = 1200
+MAX_ROLLING_MESSAGES = 12
 
 
 @dataclass
@@ -43,14 +52,62 @@ class ReactRunResult:
     iterations: int
 
 
-def run_tool_only_react(task_prompt: str, max_iterations: int = 80, model: str | None = None) -> ReactRunResult:
+def _shorten(text: str, limit: int = MAX_RECENT_MESSAGE_CHARS) -> str:
+    if len(text) <= limit:
+        return text
+    head = text[: int(limit * 0.65)]
+    tail = text[-int(limit * 0.25):]
+    return f"{head}\n...[compacted {len(text) - len(head) - len(tail)} chars]...\n{tail}"
+
+
+def _context_size(agent: Agent, next_prompt: str) -> int:
+    message_size = sum(len(str(message.get("content") or "")) for message in agent.messages)
+    return len(agent.system) + message_size + len(next_prompt)
+
+
+def _compact_and_require_skill(agent: Agent, task_prompt: str, next_prompt: str) -> str:
+    recent_messages = agent.messages[-RECENT_MESSAGE_COUNT:]
+    recent_summary = []
+    for message in recent_messages:
+        role = message.get("role", "unknown")
+        content = _shorten(str(message.get("content") or ""))
+        recent_summary.append(f"{role}: {content}")
+
+    agent.messages = []
+    return (
+        "Observation: Context was compacted because it became too long. "
+        "Before continuing, read the full skill again with `Action: read_skill: backend/SKILL.md`.\n\n"
+        f"Original task:\n{task_prompt}\n\n"
+        f"Pending prompt before compaction:\n{_shorten(next_prompt)}\n\n"
+        "Recent compacted transcript:\n"
+        + "\n\n".join(recent_summary)
+    )
+
+
+def _trim_history(agent: Agent) -> None:
+    if len(agent.messages) <= MAX_ROLLING_MESSAGES:
+        return
+    dropped = len(agent.messages) - MAX_ROLLING_MESSAGES
+    agent.messages = agent.messages[-MAX_ROLLING_MESSAGES:]
+    print(f"\n[tester notice] Dropped {dropped} older message(s) from model context to limit token usage.\n")
+
+
+def run_tool_only_react(
+    task_prompt: str,
+    max_iterations: int = 80,
+    model: str | None = None,
+) -> ReactRunResult:
     client = create_client()
     agent = Agent(client=client, system=ACP_REACT_SYSTEM, model=model)
     next_prompt = task_prompt
 
     for iteration in range(1, max_iterations + 1):
+        if _context_size(agent, next_prompt) > MAX_CONTEXT_CHARS:
+            next_prompt = _compact_and_require_skill(agent, task_prompt, next_prompt)
+
         response = agent(next_prompt)
         print(response)
+        _trim_history(agent)
         parsed = parse_react_response(response)
 
         if parsed.get("decision") and not parsed.get("action"):

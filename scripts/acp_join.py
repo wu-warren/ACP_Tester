@@ -40,6 +40,7 @@ def main() -> None:
     parser.add_argument("--model", default=None)
     args = parser.parse_args()
     configure_profile(args.profile, args.env_file)
+    os.environ["ACP_RUN_MODE"] = "join"
 
     result = run_tool_only_react(
         build_prompt(args.name, args.description),

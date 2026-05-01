@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -25,6 +26,7 @@ ACP_CDK_ENV = ACP_DIR / "cdk" / ".env"
 ACP_BACKEND_SKILL = ACP_DIR / "backend" / "SKILL.md"
 
 ALLOWED_ENV_KEYS = {"API_KEY", "ACCESS_TOKEN", "GAME_SERVER_URL"}
+JWT_PATTERN = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
 
 
 class ToolError(ValueError):
@@ -137,13 +139,24 @@ def save_api_key_to_env(argument: str) -> str:
     return f"Saved API_KEY to {local_env_path()}"
 
 
+def _save_access_token_to_env(access_token: str) -> None:
+    if access_token.count(".") != 2:
+        return
+    _upsert_local_env_var("ACCESS_TOKEN", access_token)
+
+
 def get_env_var(argument: str) -> str:
     key = argument.strip().strip('"').strip("'")
     if key not in ALLOWED_ENV_KEYS:
         raise ToolError(f"Only these env vars are exposed: {sorted(ALLOWED_ENV_KEYS)}")
-    value = os.getenv(key) or _load_local_env().get(key)
+
+    # ACP credentials are profile-scoped. Prefer the configured profile env file
+    # over process env because python-dotenv loads the shared .env for LLM keys.
+    value = _load_local_env().get(key) or os.getenv(key)
     if not value:
         raise ToolError(f"{key} is not set in environment or {local_env_path()}")
+    if key == "ACCESS_TOKEN":
+        return "ACCESS_TOKEN is saved. Use Authorization: Bearer <ACCESS_TOKEN>; curl_request will inject the exact saved token."
     return value
 
 
@@ -165,6 +178,35 @@ def _json_or_text(value: Any) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value, separators=(",", ":"))
+
+
+def _redact_large_secrets(text: str) -> str:
+    return JWT_PATTERN.sub("<ACCESS_TOKEN_SAVED>", text)
+
+
+def _sanitize_curl_output(stdout: str, stderr: str, returncode: int) -> str:
+    body_text, status = (stdout.rsplit("\nHTTPSTATUS:", 1) + [""])[:2] if "\nHTTPSTATUS:" in stdout else (stdout, "")
+    sanitized_body = body_text.strip()
+
+    try:
+        parsed_body = json.loads(sanitized_body) if sanitized_body else None
+    except json.JSONDecodeError:
+        parsed_body = None
+
+    if isinstance(parsed_body, dict) and isinstance(parsed_body.get("access_token"), str):
+        parsed_body["access_token"] = "<ACCESS_TOKEN_SAVED>"
+        sanitized_body = json.dumps(parsed_body, separators=(",", ":"))
+    else:
+        sanitized_body = _redact_large_secrets(sanitized_body)
+
+    output = sanitized_body
+    if status:
+        output = f"{output}\nHTTPSTATUS:{status.strip()}".strip()
+    if stderr.strip():
+        output = f"{output}\nSTDERR:{_redact_large_secrets(stderr.strip())}"
+    if returncode != 0:
+        output = f"{output}\nCURL_EXIT_CODE:{returncode}"
+    return output
 
 
 def curl_request(argument: str) -> str:
@@ -190,14 +232,25 @@ def curl_request(argument: str) -> str:
         raise ToolError("headers must be a JSON object.")
 
     validate_allowed_url(url)
+    parsed_url = urlparse(url)
+    run_mode = os.getenv("ACP_RUN_MODE", "").strip().lower()
+    if run_mode == "play" and method == "POST" and parsed_url.path.rstrip("/") == "/auth/agent/signup":
+        raise ToolError(
+            "Signup is blocked in play mode. Use get_env_var: API_KEY, login, "
+            "then check GET /auth/agent/me before playing."
+        )
 
     curl = shutil.which("curl.exe") or shutil.which("curl")
     if not curl:
         raise ToolError("curl is not available on PATH.")
 
     command = [curl, "-sS", "-w", "\nHTTPSTATUS:%{http_code}", "-X", method, url]
+    stored_access_token = _load_local_env().get("ACCESS_TOKEN") or os.getenv("ACCESS_TOKEN")
     for key, value in headers.items():
-        command.extend(["-H", f"{key}: {value}"])
+        header_value = str(value)
+        if key.lower() == "authorization" and header_value.lower().startswith("bearer ") and stored_access_token:
+            header_value = f"Bearer {stored_access_token}"
+        command.extend(["-H", f"{key}: {header_value}"])
 
     if body is not None:
         command.extend(["-H", "Content-Type: application/json", "-d", _json_or_text(body)])
@@ -214,12 +267,15 @@ def curl_request(argument: str) -> str:
     )
     stdout = completed.stdout or ""
     stderr = completed.stderr or ""
-    output = stdout.strip()
-    if stderr.strip():
-        output = f"{output}\nSTDERR:{stderr.strip()}"
-    if completed.returncode != 0:
-        output = f"{output}\nCURL_EXIT_CODE:{completed.returncode}"
-    return output
+    try:
+        response_body = stdout.rsplit("\nHTTPSTATUS:", 1)[0].strip()
+        parsed_body = json.loads(response_body)
+        access_token = parsed_body.get("access_token")
+        if isinstance(access_token, str):
+            _save_access_token_to_env(access_token)
+    except json.JSONDecodeError:
+        pass
+    return _sanitize_curl_output(stdout, stderr, completed.returncode)
 
 
 TOOLS = {
