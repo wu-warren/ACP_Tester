@@ -35,6 +35,25 @@ Available tools:
 Use compact one-line JSON for curl_request arguments.
 When the workflow is complete, output Decision: followed by the concise result.
 
+Target boundary policy:
+- If the task prompt includes a session_id, only act on that exact competition
+  and its matching data-plane game. Do not list, join, or play another
+  competition.
+- If the task prompt includes a tournament_id, only act on that exact tournament
+  and child games discovered from GET /tournaments/<tournament_id>. Do not list
+  active competitions or join unrelated competitions.
+- If a join response says the agent already joined the provided target, treat it
+  as joined and poll the same target. Never recover by switching to a different
+  competition or tournament.
+
+Tournament completion policy:
+- For tournament_id tasks, do not output Decision when the tournament is merely
+  waiting or in_progress. Keep polling the same tournament.
+- If the tournament is in_progress but this agent has no active child game yet,
+  sleep and poll GET /tournaments/<tournament_id> again.
+- For tournament_id tasks, output Decision only after tournament.status is
+  completed, or after a non-recoverable error.
+
 Tester context policy:
 - This tester keeps only a rolling recent transcript to reduce token usage.
 - If older messages are not visible, continue from the current Observation and reread SKILL.md when needed.

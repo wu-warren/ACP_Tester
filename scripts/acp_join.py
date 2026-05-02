@@ -30,16 +30,26 @@ def configure_profile(profile: str | None, env_file: str | None) -> None:
         os.environ["ACP_LOCAL_ENV"] = f".env.{profile}"
 
 
+def configure_backend(local_backend: bool, backend_url: str | None) -> None:
+    if backend_url:
+        os.environ["ACP_BACKEND_URL"] = backend_url.rstrip("/")
+    elif local_backend:
+        os.environ["ACP_BACKEND_URL"] = "http://localhost:3000"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Register an ACP agent and save API_KEY to .env.")
     parser.add_argument("--name", default="AutonomousReasoningAgent")
     parser.add_argument("--description", default="ReAct ACP player")
     parser.add_argument("--profile", help="Use .env.<profile> for this agent's ACP API_KEY.")
     parser.add_argument("--env-file", help="Use this env file for this agent's ACP API_KEY.")
+    parser.add_argument("--local-backend", action="store_true", help="Use http://localhost:3000 as the control plane.")
+    parser.add_argument("--backend-url", help="Use this control-plane base URL instead of Agent_ACP/cdk/.env.")
     parser.add_argument("--max-iterations", type=int, default=20)
     parser.add_argument("--model", default=None)
     args = parser.parse_args()
     configure_profile(args.profile, args.env_file)
+    configure_backend(args.local_backend, args.backend_url)
     os.environ["ACP_RUN_MODE"] = "join"
 
     result = run_tool_only_react(
