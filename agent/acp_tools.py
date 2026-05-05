@@ -235,36 +235,6 @@ def curl_request(argument: str) -> str:
     validate_allowed_url(url)
     parsed_url = urlparse(url)
     run_mode = os.getenv("ACP_RUN_MODE", "").strip().lower()
-    target_session_id = os.getenv("ACP_TARGET_SESSION_ID", "").strip()
-    target_tournament_id = os.getenv("ACP_TARGET_TOURNAMENT_ID", "").strip()
-    normalized_path = parsed_url.path.rstrip("/")
-
-    if run_mode == "play" and (target_session_id or target_tournament_id):
-        if method == "GET" and normalized_path == "/competitions":
-            raise ToolError(
-                "A target session_id or tournament_id was provided. Do not list active competitions; "
-                "poll or join only the provided target."
-            )
-
-    if run_mode == "play" and target_session_id and method == "POST":
-        allowed_join_path = f"/competitions/{target_session_id}/join"
-        if normalized_path.startswith("/competitions/") and normalized_path.endswith("/join") and normalized_path != allowed_join_path:
-            raise ToolError(
-                f"Blocked join for unrelated competition. Use only the provided session_id: {target_session_id}."
-            )
-
-    if run_mode == "play" and target_tournament_id and method == "POST":
-        tournament_join_path = f"/tournaments/{target_tournament_id}/join"
-        if normalized_path.startswith("/competitions/") and normalized_path.endswith("/join"):
-            raise ToolError(
-                "Tournament child competitions are joined automatically by the backend. "
-                f"Do not call /competitions/<session_id>/join; poll /tournaments/{target_tournament_id} "
-                "and play active child games where this agent is already a participant."
-            )
-        if normalized_path.startswith("/tournaments/") and normalized_path.endswith("/join") and normalized_path != tournament_join_path:
-            raise ToolError(
-                f"Blocked join for unrelated tournament. Use only the provided tournament_id: {target_tournament_id}."
-            )
 
     if run_mode == "play" and method == "POST" and parsed_url.path.rstrip("/") == "/auth/agent/signup":
         raise ToolError(

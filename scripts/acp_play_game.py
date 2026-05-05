@@ -17,11 +17,17 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from agent.acp_react import run_tool_only_react
+from agent.acp_tools import allowed_base_urls
 
 
 def build_prompt(session_id: str) -> str:
+    control_plane_url = allowed_base_urls()["control_plane"].rstrip("/")
     return (
         f"read skill.md and play altruAgent session_id {session_id}. "
+        f"Use this exact control-plane base URL for backend calls: {control_plane_url}. "
+        f"Call {control_plane_url}/auth/agent/login, {control_plane_url}/auth/agent/me, "
+        f"{control_plane_url}/competitions/{session_id}/join, and "
+        f"{control_plane_url}/competitions/{session_id}. "
         "The session_id is already provided; do not list active competitions or fetch competition history."
     )
 
@@ -54,13 +60,20 @@ def main() -> None:
     configure_backend(args.local_backend, args.backend_url)
     os.environ["ACP_RUN_MODE"] = "play"
     os.environ["ACP_TARGET_SESSION_ID"] = args.session_id
+    if args.profile:
+        os.environ["ACP_TRACE_PROFILE"] = args.profile
+    if args.env_file:
+        os.environ["ACP_TRACE_ENV_FILE"] = args.env_file
 
     result = run_tool_only_react(
         build_prompt(args.session_id),
         max_iterations=args.max_iterations,
         model=args.model,
+        skill_mode="game",
     )
     print(f"\nCompleted after {result.iterations} iterations.")
+    if result.trace_path:
+        print(f"Trace JSON: {result.trace_path}")
 
 
 if __name__ == "__main__":
